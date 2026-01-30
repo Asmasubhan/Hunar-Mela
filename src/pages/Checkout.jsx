@@ -1,89 +1,110 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useCart } from '../context/CartContext';
-import { useAuth } from '../context/AuthContext';
-import { supabase } from '../services/supabase';
-import stripePromise from '../services/stripe';
-import Loading from '../components/Loading';
-import { convertCurrency, formatCurrency } from '../utils/currency';
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useCart } from "../context/CartContext";
+import { useAuth } from "../context/AuthContext";
+import { supabase } from "../services/supabase";
+import Loading from "../components/Loading";
+import { convertCurrency, formatCurrency } from "../utils/currency";
 
 const Checkout = () => {
   const { cart, getTotal, clearCart } = useCart();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [currency, setCurrency] = useState('USD');
+  const [currency, setCurrency] = useState("USD");
   const [loading, setLoading] = useState(false);
+  const [stripeError, setStripeError] = useState(null);
+  const [stripePromise, setStripePromise] = useState(null);
+
+  useEffect(() => {
+    const loadStripe = async () => {
+      try {
+        const module = await import("../services/stripe");
+        setStripePromise(module.default);
+      } catch (error) {
+        setStripeError("Stripe is not configured. Please contact support.");
+        console.error("Stripe loading error:", error);
+      }
+    };
+    loadStripe();
+  }, []);
 
   if (!user) {
-    navigate('/login');
+    navigate("/login");
     return null;
   }
 
-  const ensureUserExists = async (user) => {
-  const { data } = await supabase
-    .from('users')
-    .select('id')
-    .eq('id', user.id)
-    .single();
-
-  if (!data) {
-    const { error } = await supabase.from('users').insert({
-      id: user.id,
-      email: user.email,
-      role: 'user',
-    });
-
-    if (error) throw error;
+  if (stripeError) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+          {stripeError}
+        </div>
+      </div>
+    );
   }
-};
 
-
-const handleCheckout = async () => {
-  setLoading(true);
-  try {
-    const stripe = await stripePromise;
-
-    await ensureUserExists(user);
-
-    const { data: order, error } = await supabase
-      .from('orders')
-      .insert({
-        user_id: user.id,
-        total_amount: convertCurrency(getTotal(), 'USD', currency),
-        currency,
-        status: 'pending',
-      })
-      .select()
+  const ensureUserExists = async (user) => {
+    const { data } = await supabase
+      .from("users")
+      .select("id")
+      .eq("id", user.id)
       .single();
 
-    if (error) throw error;
+    if (!data) {
+      const { error } = await supabase.from("users").insert({
+        id: user.id,
+        email: user.email,
+        role: "user",
+      });
 
-    const orderItems = cart.map(item => ({
-      order_id: order.id,
-      product_id: item.id,
-      variant_id: item.variant?.id ?? null,
-      quantity: item.quantity,
-      price: item.price,
-    }));
+      if (error) throw error;
+    }
+  };
 
-    const { error: itemsError } = await supabase
-      .from('order_items')
-      .insert(orderItems);
+  const handleCheckout = async () => {
+    setLoading(true);
+    try {
+      const stripe = await stripePromise;
 
-    if (itemsError) throw itemsError;
+      await ensureUserExists(user);
 
-    clearCart();
-    alert('Order placed successfully!');
-    navigate('/orders');
+      const { data: order, error } = await supabase
+        .from("orders")
+        .insert({
+          user_id: user.id,
+          total_amount: convertCurrency(getTotal(), "USD", currency),
+          currency,
+          status: "pending",
+        })
+        .select()
+        .single();
 
-  } catch (error) {
-    console.error('Checkout error:', error);
-    alert(error.message || 'Checkout failed.');
-  } finally {
-    setLoading(false);
-  }
-};
+      if (error) throw error;
 
+      const orderItems = cart.map((item) => ({
+        order_id: order.id,
+        product_id: item.id,
+        variant_id: item.variant?.id ?? null,
+        quantity: item.quantity,
+        price: item.price,
+      }));
+
+      const { error: itemsError } = await supabase
+        .from("order_items")
+        .insert(orderItems);
+
+      if (itemsError) throw itemsError;
+
+      clearCart();
+      alert("Order placed successfully!");
+      navigate("/orders");
+    } catch (error) {
+      console.error("Checkout error:", error);
+      alert(error.message || "Checkout failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -91,16 +112,31 @@ const handleCheckout = async () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div>
           <h2 className="text-xl font-semibold mb-4">Order Summary</h2>
-          {cart.map(item => (
-            <div key={`${item.id}-${item.variant}`} className="flex justify-between mb-2">
-              <span>{item.name} x {item.quantity}</span>
-              <span>{formatCurrency(convertCurrency(item.price * item.quantity, 'USD', currency), currency)}</span>
+          {cart.map((item) => (
+            <div
+              key={`${item.id}-${item.variant}`}
+              className="flex justify-between mb-2"
+            >
+              <span>
+                {item.name} x {item.quantity}
+              </span>
+              <span>
+                {formatCurrency(
+                  convertCurrency(item.price * item.quantity, "USD", currency),
+                  currency,
+                )}
+              </span>
             </div>
           ))}
           <div className="border-t pt-2 mt-4">
             <div className="flex justify-between font-bold">
               <span>Total</span>
-              <span>{formatCurrency(convertCurrency(getTotal(), 'USD', currency), currency)}</span>
+              <span>
+                {formatCurrency(
+                  convertCurrency(getTotal(), "USD", currency),
+                  currency,
+                )}
+              </span>
             </div>
           </div>
         </div>
